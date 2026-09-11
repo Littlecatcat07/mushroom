@@ -25,6 +25,7 @@ const MON_ELEMENT = {
   '蘑菇士兵':'木','蘑菇剑士':'木','蘑菇盾兵':'木',
   '铁匠菇':'木','大锤菇':'木',
   '蘑菇女王':'木','反制·蘑菇女王':'木','信仰·蘑菇女王':'木',
+  '树桩':'木','红眼树桩':'木','大蝙蝠':'无','恶蝠':'无','树精':'木','鬼木':'木','伐木工的恐惧':'木',
 };
 const SKILLS = {
   '攻击':     { power:100, cd:0, type:'single', element:'无' },
@@ -32,7 +33,7 @@ const SKILLS = {
   '剑舞':     { power:70, hits:3, cd:2, type:'multi', element:'金' },
   '盾反':     { power:0, cd:3, type:'shield', element:'无' },
   '连续猛击': { power:100, hits:2, cd:3, type:'multi', element:'无' },
-  '防御':     { power:0, cd:3, type:'defend', mult:3, element:'火' },
+  '防御':     { power:0, cd:3, type:'defend', mult:3, element:'无' },
   '高级防御': { power:0, cd:3, type:'defend', mult:4, element:'无' },
   '重斩':     { power:200, cd:3, type:'single', element:'金' },
   '锻打':     { power:0, cd:3, type:'forge', element:'金' },
@@ -42,6 +43,16 @@ const SKILLS = {
   '三连火球术':{ power:100, hits:3, cd:3, type:'multi', element:'火' },
   '反制':     { power:0, cd:3, type:'counter', turns:3, element:'无' },
   '灼香火':   { power:100, cd:5, type:'burnMax', element:'火' },
+  // 鬼木之森技能（与前端一致）
+  '守护':     { power:0, cd:3, type:'guard', element:'无' },
+  '狂暴':     { power:0, cd:4, type:'berserk', element:'无' },
+  '撕咬':     { power:70, hits:3, cd:2, type:'multi', element:'无' },
+  '回声':     { power:100, cd:3, type:'echo', element:'无' },
+  '冲锋':     { power:75, cd:1, type:'charge', element:'无' },
+  '蓄力':     { power:0, cd:3, type:'charge_up', element:'无' },
+  '惊吓':     { power:0, cd:3, type:'fear', element:'无' },
+  '瞬击':     { power:125, cd:1, type:'single', element:'无' },
+  '汲取':     { power:125, cd:3, type:'drain', element:'木' },
 };
 function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
 function curDef(m){
@@ -53,22 +64,30 @@ function curDef(m){
 }
 function applyDamage(target, dmg, attacker, triggerCounter){
   triggerCounter = triggerCounter!==false;
-  target.hp = Math.max(0, target.hp - dmg);
-  if(target.shield>0 && dmg>0){
-    const reflect = Math.min(dmg, target.atk*5);
+  let remaining = dmg;
+  if((target.shieldHp||0)>0 && remaining>0){
+    const absorbed=Math.min(target.shieldHp, remaining);
+    target.shieldHp -= absorbed; remaining -= absorbed;
+  }
+  target.hp = Math.max(0, target.hp - remaining);
+  if(target.shield>0 && remaining>0){
+    const reflect = Math.min(remaining, target.atk*5);
     attacker.hp = Math.max(0, attacker.hp - reflect);
     if(reflect>0) log(`  🛡️ ${target.name}盾反反弹 ${reflect} 点伤害！`);
   }
-  if(triggerCounter && dmg>0 && (target.counter||0)>0){
+  if(triggerCounter && remaining>0 && (target.counter||0)>0 && attacker){
     const cdmg = Math.max(0, Math.floor(target.atk*50/100) - curDef(attacker));
     if(cdmg>0){ attacker.hp = Math.max(0, attacker.hp - cdmg); log(`  🔁 ${target.name}【反制】反击 ${cdmg} 点伤害！`); }
   }
+  return dmg;
 }
 function computeDamage(attacker, defender, power, el){
   const mult = elementMultiplier(el, defender.element);
   const effAtk = attacker.atk * (attacker.atkBuff||1);
+  let weakF = 1 - 0.25*(attacker.weak||0); if(weakF<0) weakF=0;
+  const chargeF = (attacker.charged)?3:1;
   const base = Math.floor(effAtk * power / 100);
-  const dmg = Math.max(0, Math.floor((base - curDef(defender)) * mult));
+  const dmg = Math.max(0, Math.floor(base * mult * weakF * chargeF));
   return { dmg, mult };
 }
 let BATTLE_LOG = [];
@@ -76,8 +95,9 @@ function log(s){ BATTLE_LOG.push(s); }
 
 function performSkill(attacker, defender, skillName){
   const sk = SKILLS[skillName];
-  if(!sk){ log(`${attacker.name} 使用了无效技能。`); return; }
-  const el = sk.element || '无';
+  const el = sk ? (sk.element || '无') : '无';
+  if(!sk){ const {dmg}=computeDamage(attacker,defender,100,el); applyDamage(defender,dmg,attacker); attacker.charged=false; log(`${attacker.name} 使用了未知技能，化为普通攻击，造成 ${dmg} 点伤害！`); return; }
+
   if(sk.type==='shield'){ attacker.shield=1; log(`${attacker.name} 使用【盾反】，进入盾反状态！`); return; }
   if(sk.type==='defend'){ attacker.defend=1; attacker.defendMult=sk.mult||3; log(`${attacker.name} 使用【${skillName}】，本回合防御大幅提升！`); return; }
   if(sk.type==='buff_atk'){ attacker.atkBuff=sk.mult||1.5; attacker.atkBuffTurns=sk.turns||3; log(`${attacker.name} 使用【鼓舞】，接下来3回合攻击+50%！`); return; }
@@ -86,14 +106,14 @@ function performSkill(attacker, defender, skillName){
     const power = randInt(100,200);
     const {dmg, mult} = computeDamage(attacker, defender, power, el);
     applyDamage(defender, dmg, attacker);
-    attacker.defBuff = 3;
+    attacker.defBuff = 3; attacker.charged=false;
     log(`${attacker.name} 使用【锻打】，造成 ${dmg} 点伤害${mult>1?'（克制×2）':mult<1?'（被克制×0.5）':''}，并获得3回合防御提升！`);
     return;
   }
   if(sk.type==='burn'){
     const {dmg, mult} = computeDamage(attacker, defender, sk.power, el);
     applyDamage(defender, dmg, attacker);
-    defender.burn = (defender.burn||0) + 3;
+    defender.burn = (defender.burn||0) + 3; attacker.charged=false;
     log(`${attacker.name} 使用【引火】，造成 ${dmg} 点伤害${mult>1?'（克制×2）':mult<1?'（被克制×0.5）':''}，并使 ${defender.name} 获得3层灼烧！`);
     return;
   }
@@ -102,9 +122,17 @@ function performSkill(attacker, defender, skillName){
     const {dmg, mult} = computeDamage(attacker, defender, sk.power, el);
     const total = Math.max(0, dmg + extra);
     applyDamage(defender, total, attacker);
+    attacker.charged=false;
     log(`${attacker.name} 使用【灼香火】，造成 ${total} 点伤害${mult>1?'（克制×2）':mult<1?'（被克制×0.5）':''}！`);
     return;
   }
+  if(sk.type==='guard'){ const sh=Math.floor(attacker.maxHp*20/100); attacker.shieldHp=sh; log(`${attacker.name} 使用【守护】，获得护盾 ${sh}（最大生命20%）！`); return; }
+  if(sk.type==='berserk'){ attacker.atkBuff=2; attacker.atkBuffTurns=2; log(`${attacker.name} 使用【狂暴】，接下来2回合攻击+100%！`); return; }
+  if(sk.type==='charge_up'){ attacker.charged=true; log(`${attacker.name} 使用【蓄力】，下回合伤害大幅提升！`); return; }
+  if(sk.type==='echo'){ const {dmg,mult}=computeDamage(attacker,defender,sk.power,el); const dealt=applyDamage(defender,dmg,attacker); defender.weak=(defender.weak||0)+3; attacker.charged=false; log(`${attacker.name} 使用【回声】，造成 ${dealt} 点伤害${mult>1?'（克制×2）':''}，并使 ${defender.name} 获得3层虚弱！`); return; }
+  if(sk.type==='charge'){ const {dmg,mult}=computeDamage(attacker,defender,sk.power,el); const dealt=applyDamage(defender,dmg,attacker); defender.weak=(defender.weak||0)+1; attacker.charged=false; log(`${attacker.name} 使用【冲锋】，造成 ${dealt} 点伤害${mult>1?'（克制×2）':''}，并使 ${defender.name} 获得1层虚弱！`); return; }
+  if(sk.type==='fear'){ if((defender.weak||0)>0){ const {dmg}=computeDamage(attacker,defender,100,el); const dealt=applyDamage(defender,dmg,attacker); attacker.charged=false; log(`${attacker.name} 使用【惊吓】，对已有虚弱的 ${defender.name} 造成 ${dealt} 点伤害！`); } else { defender.weak=(defender.weak||0)+4; log(`${attacker.name} 使用【惊吓】，使 ${defender.name} 获得4层虚弱！`); } return; }
+  if(sk.type==='drain'){ const {dmg,mult}=computeDamage(attacker,defender,sk.power,el); const dealt=applyDamage(defender,dmg,attacker); const heal=Math.min(dealt, attacker.maxHp-attacker.hp); attacker.hp+=heal; attacker.charged=false; log(`${attacker.name} 使用【汲取】，造成 ${dealt} 点伤害${mult>1?'（克制×2）':''}，回复自身 ${heal} 点血量！`); return; }
   const hits = sk.hits||1;
   const power = (typeof sk.power==='number') ? sk.power : randInt(100,200);
   const mult = elementMultiplier(el, defender.element);
@@ -114,6 +142,7 @@ function performSkill(attacker, defender, skillName){
     total+=dmg; applyDamage(defender, dmg, attacker);
     if(defender.hp<=0) break;
   }
+  attacker.charged=false;
   log(`${attacker.name} 使用【${skillName}】，造成 ${total} 点伤害${mult>1?'（克制×2！）':mult<1?'（被克制×0.5）':''}！`);
 }
 function tickBurn(m){
@@ -131,19 +160,21 @@ function startTurn(m){
   if(m.defBuff>0) m.defBuff--;
   if(m.atkBuffTurns>0){ m.atkBuffTurns--; if(m.atkBuffTurns===0) m.atkBuff=1; }
   if(m.counter>0) m.counter--;
+  if((m.weak||0)>0) m.weak--;
 }
 function endCd(m, used){
-  for(const s of m.skills){ if(s===used) m.cd[s]=SKILLS[s].cd; else m.cd[s]=Math.max(0,(m.cd[s]||0)-1); }
+  for(const s of m.skills){ if(s===used) m.cd[s] = (SKILLS[s]?SKILLS[s].cd:0); else m.cd[s]=Math.max(0,(m.cd[s]||0)-1); }
 }
 function firstAlive(team){ for(let i=0;i<team.length;i++) if(team[i].hp>0) return i; return -1; }
 function hydrate(raw){
+  const skills = (raw.skills||[]).slice();
   const m = {
     name:raw.name, level:raw.level||1, element: raw.element || MON_ELEMENT[raw.name] || '木',
     maxHp:raw.maxHp, hp: (raw.curHp!=null?raw.curHp:raw.maxHp), atk:raw.atk, def:raw.def,
-    skills:(raw.skills||[]).filter(s=>SKILLS[s]),
-    shield:0, defend:0, defendMult:3, defBuff:0, atkBuff:1, atkBuffTurns:0, counter:0, burn:0, cd:{}
+    skills,
+    shield:0, shieldHp:0, defend:0, defendMult:3, defBuff:0, atkBuff:1, atkBuffTurns:0, counter:0, burn:0, weak:0, charged:false, cd:{}
   };
-  for(const s of m.skills) m.cd[s]=0;
+  for(const s of skills) m.cd[s]=0;
   return m;
 }
 
@@ -151,7 +182,7 @@ function hydrate(raw){
 const rooms = new Map();
 function genRoom(){ let r; do{ r = Math.random().toString(36).slice(2,8).toUpperCase(); }while(rooms.has(r)); return r; }
 function send(ws, obj){ if(ws && ws.readyState===1) ws.send(JSON.stringify(obj)); }
-function publicMonster(m){ return { name:m.name, level:m.level, element:m.element, hp:m.hp, maxHp:m.maxHp, atk:m.atk, def:m.def, skills:m.skills, cur:!!(m.hp>0), cd:m.cd }; }
+function publicMonster(m){ return { name:m.name, level:m.level, element:m.element, hp:m.hp, maxHp:m.maxHp, atk:m.atk, def:m.def, skills:m.skills, cur:!!(m.hp>0), cd:m.cd, shieldHp:(m.shieldHp||0), weak:(m.weak||0), charged:!!m.charged }; }
 function snapshot(room){
   return {
     type:'state', room:room.code, turn:room.turn, over:room.over, winner:room.winner,
