@@ -162,9 +162,10 @@ function snapshot(room){
 }
 function startMatch(room){
   BATTLE_LOG = [];
-  room.battle = true; room.over=false; room.winner=0; room.turn = 1;
+  room.battle = true; room.over=false; room.winner=0;
+  room.turn = Math.random()<0.5 ? 1 : 2;   // 开局随机一方先手
   room.p1cur = firstAlive(room.p1team); room.p2cur = firstAlive(room.p2team);
-  log(`⚔️ 对战开始！房主(${room.names[1]}) 先手。`);
+  log(`⚔️ 对战开始！${room.turn===1?room.names[1]:room.names[2]} 先手（击杀对方怪物的一方将保持先手）。`);
   broadcast(room);
 }
 function broadcast(room){ send(room.p1, snapshot(room)); send(room.p2, snapshot(room)); }
@@ -189,13 +190,16 @@ function doAction(room, side, action){
     const sk = action.skill;
     if((actor.cd[sk]||0)>0) return;
     startTurn(actor); performSkill(actor, defender, sk); endCd(actor, sk);
+    const killed = defender.hp<=0;          // 本次行动是否击杀对方怪物
     if(defender.hp<=0) handleDeath(room, side===1?2:1);
     if(actor.hp<=0) handleDeath(room, side);
     if(room.over){ broadcast(room); return; }
     tickBurn(actor);
     if(actor.hp<=0) handleDeath(room, side);
     if(room.over){ broadcast(room); return; }
-    room.turn = side===1?2:1; broadcast(room); return;
+    // 击杀方保持先手（被击杀方换上新怪占用其回合）；否则正常交替
+    room.turn = killed ? side : (side===1?2:1);
+    broadcast(room); return;
   }
 }
 function handleDeath(room, deadSide){
