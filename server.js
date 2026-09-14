@@ -96,6 +96,7 @@ const SKILLS = {
   '防御':     { power:0, cd:3, type:'defend', mult:3, element:'无' },
   '高级防御': { power:0, cd:3, type:'defend', mult:4, element:'无' },
   '重斩':     { power:200, cd:3, type:'single', element:'金' },
+  '重伤':     { power:200, cd:4, type:'heavy', element:'金' },
   '锻打':     { power:0, cd:3, type:'forge', element:'金' },
   '火球术':   { power:100, cd:0, type:'single', element:'火' },
   '引火':     { power:100, cd:2, type:'burn', element:'火' },
@@ -113,7 +114,7 @@ const SKILLS = {
   '惊吓':     { power:0, cd:3, type:'fear', element:'无' },
   '瞬击':     { power:125, cd:1, type:'single', element:'无' },
   '汲取':     { power:125, cd:3, type:'drain', element:'木' },
-  '扎根':     { power:0, cd:4, type:'root', element:'无' },
+  '扎根':     { power:0, cd:4, type:'root', element:'木' },
   '传染':     { power:75, cd:3, type:'infect', element:'木' },
   '恐吓':     { power:0, cd:3, type:'menace', element:'无' },
   '污染':     { power:100, cd:5, type:'pollute', element:'无' },
@@ -125,7 +126,7 @@ const SKILLS = {
   '寄生':     { power:0, cd:0, type:'parasite', element:'木' },
   // 第三章 · 腐化沼泽技能
   '投石':     { power:125, cd:1, type:'single', element:'土' },
-  '回春':     { power:0, cd:4, type:'regen', element:'无' },
+  '回春':     { power:0, cd:4, type:'regen', element:'木' },
   '连续撕咬': { power:80, hits:4, cd:3, type:'multi', element:'无' },
   '流血':     { power:100, cd:2, type:'bleed', element:'无' },
   '逐浪':     { power:150, cd:4, type:'wave', element:'水' },
@@ -133,11 +134,13 @@ const SKILLS = {
   '顽固':     { power:0, cd:3, type:'sturdy', element:'无' },
   '潜行':     { power:0, cd:4, type:'stealth', element:'无' },
   '以静制动': { power:0, cd:3, type:'static', element:'土' },
+  '土墙':     { power:0, cd:2, type:'earthwall', element:'土' },
+  '硬甲':     { power:0, cd:5, type:'hardarmor', element:'土' },
+  '转守为攻': { power:0, cd:3, type:'counterattack', element:'无' },
   '酸液喷吐': { power:225, cd:4, type:'acid', element:'木' },
   '重力领域': { power:0, cd:5, type:'gravity', element:'无' },
   // 腐化沼泽进化新技能
   '防御':     { power:0, cd:3, type:'defend', mult:3, element:'无' },
-  '重伤':     { power:200, cd:4, type:'heavy', element:'无' },
   '软甲':     { power:0, cd:1, type:'softarmor', element:'无' },
   '喷发':     { power:125, cd:4, type:'erupt', element:'火' },
   '迅捷':     { power:0, cd:3, type:'swift', element:'无' },
@@ -245,11 +248,14 @@ function performSkill(attacker, defender, skillName){
   if(sk.type==='static'){ attacker.tenacity=(attacker.tenacity||0)+1; const layers=(attacker.tenacity||0); const {dmg,mult}=computeDamage(attacker,defender, layers*50, '土'); const dealt=applyDamage(defender,dmg,attacker); attacker.charged=false; log(`${attacker.name} 使用【以静制动】，获得1层坚韧，并造成 ${dealt} 点土系伤害（50×${layers}坚韧层数）！`); return; }
   if(sk.type==='acid'){ const {dmg,mult}=computeDamage(attacker,defender,225,'木'); const dealt=applyDamage(defender,dmg,attacker); defender.poison=(defender.poison||0)+3; defender.poisonAtk=attacker.atk; defender.poisonEl='木'; attacker.charged=false; log(`${attacker.name} 使用【酸液喷吐】，造成 ${dealt} 点木系伤害，并使 ${defender.name} 获得3层中毒！`); return; }
   if(sk.type==='gravity'){ defender.weak=(defender.weak||0)+3; defender.vuln=(defender.vuln||0)+2; attacker.tenacity=(attacker.tenacity||0)+1; attacker.charged=false; log(`${attacker.name} 使用【重力领域】，使对方获得3层虚弱与2层易伤，自身获得1层坚韧！`); return; }
-  if(sk.type==='heavy'){ const {dmg,mult}=computeDamage(attacker,defender,200,'无'); const dealt=applyDamage(defender,dmg,attacker); defender.vuln=(defender.vuln||0)+2; attacker.charged=false; log(`${attacker.name} 使用【重伤】，造成 ${dealt} 点伤害，并使 ${defender.name} 获得2层易伤！`); return; }
+  if(sk.type==='heavy'){ const {dmg,mult}=computeDamage(attacker,defender,200, el); const dealt=applyDamage(defender,dmg,attacker); defender.vuln=(defender.vuln||0)+2; attacker.charged=false; log(`${attacker.name} 使用【重伤】，造成 ${dealt} 点伤害，并使 ${defender.name} 获得2层易伤！`); return; }
   if(sk.type==='softarmor'){ attacker.defBuff=3; attacker.tenacity=(attacker.tenacity||0)+2; attacker.charged=false; log(`${attacker.name} 使用【软甲】，防御提高20%（3回合），并获得2层坚韧！`); return; }
   if(sk.type==='erupt'){ const {dmg,mult}=computeDamage(attacker,defender,125,'火'); const dealt=applyDamage(defender,dmg,attacker); defender.burn=(defender.burn||0)+4; defender.burnAtk=attacker.atk; defender.burnEl='火'; attacker.charged=false; log(`${attacker.name} 使用【喷发】，造成 ${dealt} 点火系伤害，并使 ${defender.name} 获得4层灼烧！`); return; }
   if(sk.type==='swift'){ attacker.evade=(attacker.evade||0)+2; attacker.charged=false; log(`${attacker.name} 使用【迅捷】，获得2层闪避（每段伤害50%概率闪避）！`); return; }
   if(sk.type==='acidrain'){ const {dmg,mult}=computeDamage(attacker,defender,125,'木'); const dealt=applyDamage(defender,dmg,attacker); defender.poison=(defender.poison||0)+3; defender.poisonAtk=attacker.atk; defender.poisonEl='木'; defender.weak=(defender.weak||0)+3; attacker.charged=false; log(`${attacker.name} 使用【酸雨】，造成 ${dealt} 点木系伤害，并使 ${defender.name} 获得3层中毒与3层虚弱！`); return; }
+  if(sk.type==='earthwall'){ const sh=Math.floor(attacker.maxHp*30/100); attacker.shieldHp=sh; attacker.tenacity=(attacker.tenacity||0)+1; attacker.charged=false; log(`${attacker.name} 使用【土墙】，获得护盾 ${sh}（最大生命30%）与1层坚韧！`); return; }
+  if(sk.type==='hardarmor'){ attacker.defend=1; attacker.defendMult=4; const sh=Math.floor(attacker.maxHp*30/100); attacker.shieldHp=sh; attacker.tenacity=(attacker.tenacity||0)+5; attacker.charged=false; log(`${attacker.name} 使用【硬甲】，防御×4，获得护盾 ${sh}（最大生命30%）与5层坚韧！`); return; }
+  if(sk.type==='counterattack'){ if((attacker.tenacity||0)>0){ const layers=attacker.tenacity; const {dmg}=computeDamage(attacker,defender, layers*100, '无'); const dealt=applyDamage(defender,dmg,attacker); attacker.tenacity=0; attacker.charged=false; log(`${attacker.name} 使用【转守为攻】，以 ${layers} 层坚韧发动攻击，造成 ${dealt} 点伤害（坚韧层数×100%），并清空所有坚韧！`); } else { attacker.inspire=(attacker.inspire||0)+5; attacker.atkBuff=Math.max(attacker.atkBuff,1.5); attacker.vuln=(attacker.vuln||0)+1; attacker.charged=false; log(`${attacker.name} 使用【转守为攻】，无坚韧可转，自身获得5层鼓舞与1层易伤！`); } return; }
   if(sk.type==='overweight'){ attacker.atkUp=3; attacker.tenacity=(attacker.tenacity||0)+3; attacker.shieldHp=Math.floor(attacker.maxHp*10/100); attacker.charged=false; log(`${attacker.name} 使用【超重】，攻击提高20%（3回合），获得3层坚韧与护盾（生命10%）！`); return; }
   const hits = sk.hits||1;
   const power = (typeof sk.power==='number') ? sk.power : randInt(100,200);
