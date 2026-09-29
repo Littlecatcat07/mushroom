@@ -86,6 +86,7 @@ const MON_ELEMENT = {
   '蘑菇女王':'木','反制·蘑菇女王':'木','信仰·蘑菇女王':'木',
   '树桩':'木','红眼树桩':'木','大蝙蝠':'无','恶蝠':'无','树精':'木','鬼木':'木','伐木工的恐惧':'木',
   '树人守卫':'木','红眼树人守卫':'木','声波蝙蝠':'无','爬蝠':'无','惊吓恶蝠':'无','病毒恶蝠':'无','树精头领':'木','鬼树':'木','恐吓·恐惧':'木','污染·恐惧':'木',
+  '钢刺菇':'木','蘑菇亲卫':'木','蘑菇女皇':'木','刺匠菇':'木','菇卫队长':'木','反击·蘑菇女皇':'木','信仰·蘑菇女皇':'木',
 };
 const SKILLS = {
   '攻击':     { power:100, cd:0, type:'single', element:'无' },
@@ -103,6 +104,17 @@ const SKILLS = {
   '鼓舞':     { power:0, cd:3, type:'inspire', element:'无' },
   '三连火球术':{ power:100, hits:3, cd:3, type:'multi', element:'火' },
   '反制':     { power:0, cd:3, type:'counter', turns:3, element:'无' },
+  '全力重击': { power:0, cd:4, type:'maxhpstrike', element:'无' },
+  '视觉剥夺': { power:85, cd:5, type:'vision', element:'无' },
+  '极速连击': { power:85, cd:5, type:'evadecombo', element:'无' },
+  '鬼体':     { power:0, cd:6, type:'ghost', element:'无' },
+  '霸体':     { power:0, cd:3, type:'bati', element:'无' },
+  '灵体':     { power:0, cd:5, type:'spirit', element:'无' },
+  '强光':     { power:0, cd:3, type:'blind', element:'无' },
+  '冰冻':     { power:0, cd:3, type:'freeze', element:'水' },
+  '吸血':     { power:100, cd:2, type:'drain', element:'无' },
+  '迟缓':     { power:0, cd:3, type:'slow', element:'无' },
+  '锤击':     { power:175, cd:3, type:'hammer', element:'金' },
   '灼香火':   { power:100, cd:5, type:'burnMax', element:'火' },
   // 鬼木之森技能（与前端一致）
   '守护':     { power:0, cd:3, type:'guard', element:'无' },
@@ -146,6 +158,14 @@ const SKILLS = {
   '迅捷':     { power:0, cd:3, type:'swift', element:'无' },
   '酸雨':     { power:125, cd:3, type:'acidrain', element:'木' },
   '超重':     { power:0, cd:3, type:'overweight', element:'无' },
+  // 蘑菇城 / 新技能（与前端一致）
+  '木盾':     { power:0, cd:1, type:'woodshield', element:'木' },
+  '高级鼓舞': { power:0, cd:4, type:'inspire', inspireLayers:7, element:'无' },
+  '灼信火':   { power:250, cd:5, type:'zhuxin', element:'火' },
+  '藤盾':     { power:0, cd:3, type:'vineshield', element:'木' },
+  '以毒攻毒': { power:0, cd:2, type:'antidote', element:'木' },
+  '高级汲取': { power:175, cd:4, type:'drain', element:'木' },
+  '绝对反击': { power:0, cd:4, type:'absCounter', element:'无' },
 };
 function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
 function curDef(m){
@@ -159,6 +179,7 @@ function applyDamage(target, dmg, attacker, triggerCounter){
   triggerCounter = triggerCounter!==false;
   let remaining = dmg;
   if(triggerCounter!==false && (target.evade||0)>0 && Math.random()<0.5){ log(`  💨 ${target.name} 闪避了攻击！`); return 0; }
+  if(triggerCounter!==false && attacker && (attacker.blind||0)>0 && Math.random()<0.5){ log(`  ${attacker.name} 被致盲，攻击未能命中！`); return 0; }
   if((target.vuln||0)>0 && remaining>0) remaining=Math.floor(remaining*1.5);
   if((target.tenacity||0)>0 && remaining>0) remaining=Math.floor(remaining*0.75);
   if((target.shieldHp||0)>0 && remaining>0){
@@ -166,17 +187,19 @@ function applyDamage(target, dmg, attacker, triggerCounter){
     target.shieldHp -= absorbed; remaining -= absorbed;
   }
   target.hp = Math.max(0, target.hp - remaining);
+  if(remaining>0 && (target.bati||0)>0) target.tenacity=(target.tenacity||0)+1;
   if(target.shield>0 && remaining>0){
     const reflect = Math.min(remaining, target.atk*5);
     attacker.hp = Math.max(0, attacker.hp - reflect);
     if(reflect>0) log(`  🛡️ ${target.name}盾反反弹 ${reflect} 点伤害！`);
   }
-  if(triggerCounter && remaining>0 && (target.counter||0)>0 && attacker){
-    const cdmg = Math.max(0, Math.floor(target.atk*50/100) - curDef(attacker));
+  if(triggerCounter && remaining>0 && (target.counter||0)>0 && attacker && target.hp>0){
+    const cdmg = Math.max(0, Math.floor(target.atk*75/100) - curDef(attacker));
     if(cdmg>0){ attacker.hp = Math.max(0, attacker.hp - cdmg); log(`  🔁 ${target.name}【反制】反击 ${cdmg} 点伤害！`); }
   }
   return dmg;
 }
+function addVuln(t,n){ t.vuln=(t.vuln||0)+n; if((t.bati||0)>0) t.tenacity=0; }
 function computeDamage(attacker, defender, power, el){
   const mult = elementMultiplier(el, defender.element);
   const effAtk = attacker.atk * (attacker.atkBuff||1) * (attacker.atkUp>0?1.2:1);
@@ -196,20 +219,20 @@ function performSkill(attacker, defender, skillName){
 
   if(sk.type==='shield'){ attacker.shield=1; log(`${attacker.name} 使用【盾反】，进入盾反状态！`); return; }
   if(sk.type==='defend'){ attacker.defend=1; attacker.defendMult=sk.mult||3; log(`${attacker.name} 使用【${skillName}】，本回合防御大幅提升！`); return; }
-  if(sk.type==='inspire'){ attacker.inspire=(attacker.inspire||0)+3; attacker.atkBuff=1.5; log(`${attacker.name} 使用【鼓舞】，获得3层【鼓舞】（攻击+50%）！`); return; }
+  if(sk.type==='inspire'){ const layers=sk.inspireLayers||3; attacker.inspire=(attacker.inspire||0)+layers; attacker.atkBuff=1.5; log(`${attacker.name} 使用【${layers>=7?'高级鼓舞':'鼓舞'}】，获得${layers}层【鼓舞】（攻击+50%）！`); return; }
   if(sk.type==='zhui'){ const {dmg,mult}=computeDamage(attacker,defender,sk.power,el); const dealt=applyDamage(defender,dmg,attacker); attacker.inspire=(attacker.inspire||0)+1; attacker.atkBuff=Math.max(attacker.atkBuff,1.5); attacker.charged=false; log(`${attacker.name} 使用【追击】，造成 ${dealt} 点伤害${mult>1?'（克制×2）':''}，并获得1层鼓舞！`); return; }
-  if(sk.type==='kanpo'){ attacker.inspire=(attacker.inspire||0)+1; attacker.atkBuff=Math.max(attacker.atkBuff,1.5); defender.vuln=(defender.vuln||0)+2; attacker.charged=false; log(`${attacker.name} 使用【看破】，自身获得1层鼓舞，并使 ${defender.name} 获得2层易伤！`); return; }
+  if(sk.type==='kanpo'){ attacker.inspire=(attacker.inspire||0)+1; attacker.atkBuff=Math.max(attacker.atkBuff,1.5); addVuln(defender,2); attacker.charged=false; log(`${attacker.name} 使用【看破】，自身获得1层鼓舞，并使 ${defender.name} 获得2层易伤！`); return; }
   if(sk.type==='tenacity'){ attacker.tenacity=(attacker.tenacity||0)+4; attacker.charged=false; log(`${attacker.name} 使用【坚韧】，获得4层【坚韧】（受伤-25%）！`); return; }
   if(sk.type==='applypoison'){ defender.poison=(defender.poison||0)+5; defender.poisonAtk=attacker.atk; defender.poisonEl='木'; attacker.charged=false; log(`${attacker.name} 使用【施毒】，使 ${defender.name} 获得5层中毒！`); return; }
   if(sk.type==='dufa'){ defender.poison=(defender.poison||0)+1; const layers=defender.poison; const {dmg,mult}=computeDamage(attacker,defender, layers*50, '木'); const dealt=applyDamage(defender,dmg,attacker); attacker.charged=false; log(`${attacker.name} 使用【毒发】，使 ${defender.name} 中毒+1层，造成 ${dealt} 点木系伤害（50×${layers}）！`); return; }
   if(sk.type==='parasite'){ defender.parasite={atk:attacker.atk, el:attacker.element, owner:(arguments[3]||1)}; attacker.charged=false; log(`${attacker.name} 对 ${defender.name} 施加【寄生】状态！`); return; }
-  if(sk.type==='counter'){ attacker.counter=sk.turns||3; log(`${attacker.name} 进入【反制】状态，3回合内受击反击！`); return; }
+  if(sk.type==='counter'){ attacker.counter=(attacker.counter||0)+(sk.turns||3); log(`${attacker.name} 获得${(sk.turns||3)}层【反制】（受击反击75%自身攻击，多段触发多次）！`); return; }
   if(sk.type==='forge'){
     const power = randInt(100,200);
     const {dmg, mult} = computeDamage(attacker, defender, power, el);
     applyDamage(defender, dmg, attacker);
-    attacker.defBuff = 3; attacker.charged=false;
-    log(`${attacker.name} 使用【锻打】，造成 ${dmg} 点伤害${mult>1?'（克制×2）':mult<1?'（被克制×0.5）':''}，并获得3回合防御提升！`);
+    attacker.tenacity=(attacker.tenacity||0)+3; attacker.charged=false;
+    log(`${attacker.name} 使用【锻打】，造成 ${dmg} 点伤害${mult>1?'（克制×2）':mult<1?'（被克制×0.5）':''}，并获得3层【坚韧】！`);
     return;
   }
   if(sk.type==='burn'){
@@ -238,7 +261,7 @@ function performSkill(attacker, defender, skillName){
   if(sk.type==='root'){ const heal=Math.min(Math.floor(attacker.maxHp*10/100), attacker.maxHp-attacker.hp); attacker.hp+=heal; attacker.shieldHp=Math.floor(attacker.maxHp*30/100); attacker.charged=false; log(`${attacker.name} 使用【扎根】，回复 ${heal} 点血量，并获得护盾（最大生命30%）！`); return; }
   if(sk.type==='infect'){ const {dmg,mult}=computeDamage(attacker,defender,sk.power,el); const dealt=applyDamage(defender,dmg,attacker); if((defender.poison||0)>0) defender.poison+=5; else defender.poison=5; defender.poisonAtk=attacker.atk; defender.poisonEl='木'; attacker.charged=false; log(`${attacker.name} 使用【传染】，造成 ${dealt} 点伤害${mult>1?'（克制×2）':''}，并使 ${defender.name} 获得5层中毒！`); return; }
   if(sk.type==='menace'){ defender.weak=(defender.weak||0)+1; const layers=(defender.weak||0); const {dmg}=computeDamage(attacker,defender, layers*50, el); const dealt=applyDamage(defender,dmg,attacker); attacker.charged=false; log(`${attacker.name} 使用【恐吓】，使 ${defender.name} 获得1层虚弱，并造成 ${dealt} 点伤害（虚弱层数×50）！`); return; }
-  if(sk.type==='pollute'){ const {dmg}=computeDamage(attacker,defender,100,el); const dealt=applyDamage(defender,dmg,attacker); defender.weak=(defender.weak||0)+3; defender.vuln=(defender.vuln||0)+3; attacker.charged=false; log(`${attacker.name} 使用【污染】，造成 ${dealt} 点伤害，并使 ${defender.name} 获得3层虚弱与3层易伤！`); return; }
+  if(sk.type==='pollute'){ const {dmg}=computeDamage(attacker,defender,100,el); const dealt=applyDamage(defender,dmg,attacker); defender.weak=(defender.weak||0)+3; addVuln(defender,3); attacker.charged=false; log(`${attacker.name} 使用【污染】，造成 ${dealt} 点伤害，并使 ${defender.name} 获得3层虚弱与3层易伤！`); return; }
   if(sk.type==='regen'){ const heal=Math.min(Math.floor(attacker.maxHp*40/100), attacker.maxHp-attacker.hp); attacker.hp+=heal; attacker.charged=false; log(`${attacker.name} 使用【回春】，回复 ${heal} 点血量（最大生命40%）！`); return; }
   if(sk.type==='bleed'){ const {dmg,mult}=computeDamage(attacker,defender,100,'无'); const dealt=applyDamage(defender,dmg,attacker); defender.weak=(defender.weak||0)+2; attacker.charged=false; log(`${attacker.name} 使用【流血】，造成 ${dealt} 点伤害，并使 ${defender.name} 获得2层虚弱！`); return; }
   if(sk.type==='wave'){ const {dmg,mult}=computeDamage(attacker,defender,150,'水'); const dealt=applyDamage(defender,dmg,attacker); attacker.inspire=(attacker.inspire||0)+3; attacker.atkBuff=Math.max(attacker.atkBuff,1.5); attacker.charged=false; log(`${attacker.name} 使用【逐浪】，造成 ${dealt} 点水系伤害，并获得3层鼓舞！`); return; }
@@ -247,8 +270,8 @@ function performSkill(attacker, defender, skillName){
   if(sk.type==='stealth'){ attacker.evade=(attacker.evade||0)+3; attacker.charged=false; log(`${attacker.name} 使用【潜行】，获得3层闪避（每段伤害50%概率闪避）！`); return; }
   if(sk.type==='static'){ attacker.tenacity=(attacker.tenacity||0)+1; const layers=(attacker.tenacity||0); const {dmg,mult}=computeDamage(attacker,defender, layers*50, '土'); const dealt=applyDamage(defender,dmg,attacker); attacker.charged=false; log(`${attacker.name} 使用【以静制动】，获得1层坚韧，并造成 ${dealt} 点土系伤害（50×${layers}坚韧层数）！`); return; }
   if(sk.type==='acid'){ const {dmg,mult}=computeDamage(attacker,defender,225,'木'); const dealt=applyDamage(defender,dmg,attacker); defender.poison=(defender.poison||0)+3; defender.poisonAtk=attacker.atk; defender.poisonEl='木'; attacker.charged=false; log(`${attacker.name} 使用【酸液喷吐】，造成 ${dealt} 点木系伤害，并使 ${defender.name} 获得3层中毒！`); return; }
-  if(sk.type==='gravity'){ defender.weak=(defender.weak||0)+3; defender.vuln=(defender.vuln||0)+2; attacker.tenacity=(attacker.tenacity||0)+1; attacker.charged=false; log(`${attacker.name} 使用【重力领域】，使对方获得3层虚弱与2层易伤，自身获得1层坚韧！`); return; }
-  if(sk.type==='heavy'){ const {dmg,mult}=computeDamage(attacker,defender,200, el); const dealt=applyDamage(defender,dmg,attacker); defender.vuln=(defender.vuln||0)+2; attacker.charged=false; log(`${attacker.name} 使用【重伤】，造成 ${dealt} 点伤害，并使 ${defender.name} 获得2层易伤！`); return; }
+  if(sk.type==='gravity'){ defender.weak=(defender.weak||0)+3; addVuln(defender,2); attacker.tenacity=(attacker.tenacity||0)+1; attacker.charged=false; log(`${attacker.name} 使用【重力领域】，使对方获得3层虚弱与2层易伤，自身获得1层坚韧！`); return; }
+  if(sk.type==='heavy'){ const {dmg,mult}=computeDamage(attacker,defender,200, el); const dealt=applyDamage(defender,dmg,attacker); addVuln(defender,2); attacker.charged=false; log(`${attacker.name} 使用【重伤】，造成 ${dealt} 点伤害，并使 ${defender.name} 获得2层易伤！`); return; }
   if(sk.type==='softarmor'){ attacker.defBuff=3; attacker.tenacity=(attacker.tenacity||0)+2; attacker.charged=false; log(`${attacker.name} 使用【软甲】，防御提高20%（3回合），并获得2层坚韧！`); return; }
   if(sk.type==='erupt'){ const {dmg,mult}=computeDamage(attacker,defender,125,'火'); const dealt=applyDamage(defender,dmg,attacker); defender.burn=(defender.burn||0)+4; defender.burnAtk=attacker.atk; defender.burnEl='火'; attacker.charged=false; log(`${attacker.name} 使用【喷发】，造成 ${dealt} 点火系伤害，并使 ${defender.name} 获得4层灼烧！`); return; }
   if(sk.type==='swift'){ attacker.evade=(attacker.evade||0)+2; attacker.charged=false; log(`${attacker.name} 使用【迅捷】，获得2层闪避（每段伤害50%概率闪避）！`); return; }
@@ -257,6 +280,21 @@ function performSkill(attacker, defender, skillName){
   if(sk.type==='hardarmor'){ attacker.defend=1; attacker.defendMult=4; const sh=Math.floor(attacker.maxHp*30/100); attacker.shieldHp=sh; attacker.tenacity=(attacker.tenacity||0)+5; attacker.charged=false; log(`${attacker.name} 使用【硬甲】，防御×4，获得护盾 ${sh}（最大生命30%）与5层坚韧！`); return; }
   if(sk.type==='counterattack'){ if((attacker.tenacity||0)>0){ const layers=attacker.tenacity; const {dmg}=computeDamage(attacker,defender, layers*100, '无'); const dealt=applyDamage(defender,dmg,attacker); attacker.tenacity=0; attacker.charged=false; log(`${attacker.name} 使用【转守为攻】，以 ${layers} 层坚韧发动攻击，造成 ${dealt} 点伤害（坚韧层数×100%），并清空所有坚韧！`); } else { attacker.inspire=(attacker.inspire||0)+5; attacker.atkBuff=Math.max(attacker.atkBuff,1.5); attacker.vuln=(attacker.vuln||0)+1; attacker.charged=false; log(`${attacker.name} 使用【转守为攻】，无坚韧可转，自身获得5层鼓舞与1层易伤！`); } return; }
   if(sk.type==='overweight'){ attacker.atkUp=3; attacker.tenacity=(attacker.tenacity||0)+3; attacker.shieldHp=Math.floor(attacker.maxHp*10/100); attacker.charged=false; log(`${attacker.name} 使用【超重】，攻击提高20%（3回合），获得3层坚韧与护盾（生命10%）！`); return; }
+  if(sk.type==='maxhpstrike'){ const dmg=Math.floor(attacker.maxHp*40/100); const dealt=applyDamage(defender,dmg,attacker); attacker.charged=false; log(`${attacker.name} 使用【全力重击】，造成 ${dealt} 点无系伤害（自身最大生命40%）！`); return; }
+  if(sk.type==='vision'){ defender.blind=(defender.blind||0)+1; const hits=defender.blind; let total=0; for(let h=0; h<hits; h++){ const {dmg}=computeDamage(attacker,defender,85,'无'); total+=applyDamage(defender,dmg,attacker); } attacker.charged=false; log(`${attacker.name} 使用【视觉剥夺】，使 ${defender.name} 致盲并造成 ${total} 点无系伤害（${hits}段）！`); return; }
+  if(sk.type==='evadecombo'){ attacker.evade=(attacker.evade||0)+1; const hits=attacker.evade; let total=0; for(let h=0; h<hits; h++){ const {dmg}=computeDamage(attacker,defender,85,'无'); total+=applyDamage(defender,dmg,attacker); } attacker.charged=false; log(`${attacker.name} 使用【极速连击】，造成 ${total} 点无系伤害（${hits}段）！`); return; }
+  if(sk.type==='ghost'){ const heal=Math.min(Math.floor(attacker.maxHp*60/100), attacker.maxHp-attacker.hp); attacker.hp+=heal; attacker.charged=false; log(`${attacker.name} 使用【鬼体】，回复 ${heal} 点血量（最大生命60%）！`); return; }
+  if(sk.type==='bati'){ attacker.bati=1; attacker.charged=false; log(`${attacker.name} 进入【霸体】状态！每次受击获得1层坚韧；若受到易伤则清空坚韧。`); return; }
+  if(sk.type==='spirit'){ attacker.evade=(attacker.evade||0)+5; attacker.tenacity=(attacker.tenacity||0)+5; attacker.charged=false; log(`${attacker.name} 使用【灵体】，获得5层闪避与5层坚韧！`); return; }
+  if(sk.type==='blind'){ defender.blind=(defender.blind||0)+4; attacker.charged=false; log(`${attacker.name} 使用【强光】，使 ${defender.name} 获得4层致盲（攻击50%概率丢失）！`); return; }
+  if(sk.type==='freeze'){ defender.freeze=(defender.freeze||0)+5; defender.freezeAtk=attacker.atk; defender.freezeEl='水'; attacker.charged=false; log(`${attacker.name} 使用【冰冻】，使 ${defender.name} 获得5层冰冻！`); return; }
+  if(sk.type==='slow'){ defender.weak=(defender.weak||0)+5; attacker.charged=false; log(`${attacker.name} 使用【迟缓】，使 ${defender.name} 获得5层虚弱！`); return; }
+  if(sk.type==='hammer'){ const {dmg,mult}=computeDamage(attacker,defender,175,'金'); const dealt=applyDamage(defender,dmg,attacker); defender.weak=(defender.weak||0)+1; addVuln(defender,1); attacker.charged=false; log(`${attacker.name} 使用【锤击】，造成 ${dealt} 点金系伤害${mult>1?'(克制×2)':mult<1?'(被克制×0.5)':''}，并使 ${defender.name} 获得1层虚弱与1层易伤！`); return; }
+  if(sk.type==='absCounter'){ attacker.counter=(attacker.counter||0)+5; log(`${attacker.name} 使用【绝对反击】，获得5层【反制】（受击反击75%自身攻击，多段触发多次）！`); return; }
+  if(sk.type==='woodshield'){ const sh=Math.floor(attacker.maxHp*30/100); attacker.shieldHp=sh; log(`${attacker.name} 使用【木盾】，获得护盾 ${sh}（最大生命30%）！`); return; }
+  if(sk.type==='vineshield'){ const sh=Math.floor(attacker.maxHp*60/100); attacker.shieldHp=sh; attacker.tenacity=(attacker.tenacity||0)+1; log(`${attacker.name} 使用【藤盾】，获得护盾 ${sh}（最大生命60%）与1层坚韧！`); return; }
+  if(sk.type==='zhuxin'){ const {dmg,mult}=computeDamage(attacker,defender,250,'火'); const bonus=Math.floor(defender.maxHp*33/100); const total=Math.max(0,dmg+bonus); const dealt=applyDamage(defender,total,attacker); attacker.charged=false; log(`${attacker.name} 使用【灼信火】，造成 ${dealt} 点火系伤害${mult>1?'(克制×2)':mult<1?'(被克制×0.5)':''}（含敌方最大生命33%=${bonus}）！`); return; }
+  if(sk.type==='antidote'){ attacker.poison=0; attacker.burn=0; attacker.freeze=0; attacker.parasite=null; attacker.vuln=0; attacker.weak=0; attacker.poisonAtk=attacker.atk; attacker.poisonEl='木'; defender.poison=(defender.poison||0)+3; defender.poisonAtk=attacker.atk; defender.poisonEl='木'; attacker.poison=3; log(`${attacker.name} 使用【以毒攻毒】，净化自身负面状态，并与 ${defender.name} 同时获得3层中毒！`); return; }
   const hits = sk.hits||1;
   const power = (typeof sk.power==='number') ? sk.power : randInt(100,200);
   const mult = elementMultiplier(el, defender.element);
@@ -286,6 +324,15 @@ function tickPoison(m){
   const { dmg } = computeDamage(fake, m, 50, el);
   applyDamage(m, dmg, fake, false);
   if(dmg>0) log(`☠️ ${m.name} 受到中毒，损失 ${dmg} 点血量！`);
+}
+function tickFreeze(m){
+  if((m.freeze||0)<=0) return;
+  m.freeze--;
+  const atk = m.freezeAtk||10; const el = m.freezeEl||'水';
+  const fake = {atk:atk, atkBuff:1, weak:0, charged:false, shield:0, shieldHp:0, defend:0, defendMult:3, defBuff:0, counter:0, element:el};
+  const { dmg } = computeDamage(fake, m, 50, el);
+  applyDamage(m, dmg, fake, false);
+  if(dmg>0) log(`${m.name} 受到冰冻，损失 ${dmg} 点血量！`);
 }
 function tickParasite(m, healer){
   if(!m.parasite) return;
@@ -322,7 +369,7 @@ function hydrate(raw){
     name:raw.name, level:raw.level||1, element: raw.element || MON_ELEMENT[raw.name] || '木',
     maxHp:raw.maxHp, hp: (raw.curHp!=null?raw.curHp:raw.maxHp), atk:raw.atk, def:raw.def,
     skills,
-    shield:0, shieldHp:0, defend:0, defendMult:3, defBuff:0, atkBuff:1, atkBuffTurns:0, berserkMult:2, counter:0, burn:0, weak:0, charged:false, inspire:0, tenacity:0, parasite:null, poison:0, poisonAtk:0, poisonEl:'木', vuln:0, evade:0, atkUp:0, cd:{}
+    shield:0, shieldHp:0, defend:0, defendMult:3, defBuff:0, atkBuff:1, atkBuffTurns:0, berserkMult:2, counter:0, burn:0, weak:0, charged:false, inspire:0, tenacity:0, parasite:null, poison:0, poisonAtk:0, poisonEl:'木', vuln:0, evade:0, atkUp:0, blind:0, bati:0, freeze:0, freezeAtk:0, freezeEl:'水', cd:{}
   };
   for(const s of skills) m.cd[s]=0;
   return m;
@@ -332,7 +379,7 @@ function hydrate(raw){
 const rooms = new Map();
 function genRoom(){ let r; do{ r = Math.random().toString(36).slice(2,8).toUpperCase(); }while(rooms.has(r)); return r; }
 function send(ws, obj){ if(ws && ws.readyState===1) ws.send(JSON.stringify(obj)); }
-function publicMonster(m){ return { name:m.name, level:m.level, element:m.element, hp:m.hp, maxHp:m.maxHp, atk:m.atk, def:m.def, skills:m.skills, cur:!!(m.hp>0), cd:m.cd, shieldHp:(m.shieldHp||0), weak:(m.weak||0), charged:!!m.charged, inspire:(m.inspire||0), tenacity:(m.tenacity||0), poison:(m.poison||0), vuln:(m.vuln||0), parasite:!!m.parasite }; }
+function publicMonster(m){ return { name:m.name, level:m.level, element:m.element, hp:m.hp, maxHp:m.maxHp, atk:m.atk, def:m.def, skills:m.skills, cur:!!(m.hp>0), cd:m.cd, shieldHp:(m.shieldHp||0), weak:(m.weak||0), charged:!!m.charged, inspire:(m.inspire||0), tenacity:(m.tenacity||0), poison:(m.poison||0), vuln:(m.vuln||0), blind:(m.blind||0), bati:(m.bati||0), freeze:(m.freeze||0), freezeAtk:(m.freezeAtk||0), freezeEl:(m.freezeEl||'水'), parasite:!!m.parasite }; }
 function snapshot(room){
   return {
     type:'state', room:room.code, turn:room.turn, over:room.over, winner:room.winner,
@@ -381,7 +428,10 @@ function doAction(room, side, action){
     tickPoison(actor);
     if(actor.hp<=0) handleDeath(room, side);
     if(room.over){ broadcast(room); return; }
-    if(actor.parasite){ const hs = actor.parasite.owner===1 ? room.p1team[room.p1cur] : room.p2team[room.p2cur]; tickParasite(actor, hs); }
+        tickFreeze(actor);
+    if(actor.hp < 0) handleDeath(room, side);
+    if(room.over){ broadcast(room); return; }
+if(actor.parasite){ const hs = actor.parasite.owner===1 ? room.p1team[room.p1cur] : room.p2team[room.p2cur]; tickParasite(actor, hs); }
     if(actor.hp<=0) handleDeath(room, side);
     if(room.over){ broadcast(room); return; }
     // 击杀方保持先手（被击杀方换上新怪占用其回合）；否则正常交替
@@ -389,7 +439,7 @@ function doAction(room, side, action){
     broadcast(room); return;
   }
 }
-function handleDeath(room, deadSide){
+function handleDeath(room, deadSide){ if(room.over) return;
   const team = deadSide===1?room.p1team:room.p2team;
   const next = firstAlive(team);
   if(next===-1){ room.over=true; room.winner = deadSide===1?2:1; log(`🏆 ${room.names[room.winner]} 获得胜利！`); return; }
